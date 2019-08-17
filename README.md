@@ -1,4 +1,5 @@
 # 搜狗词库转文本格式
+Rust初学者，欢迎大家一起学习交流。
 ```
 Convert sogou scel file to rime dict file.
 
