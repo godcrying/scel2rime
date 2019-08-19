@@ -25,13 +25,13 @@ struct WrongFileType;
 
 impl fmt::Display for WrongFileType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid file type")
+        write!(f, "文件损坏或文件格式不对！！")
     }
 }
 
 impl error::Error for WrongFileType {
     fn description(&self) -> &str {
-        "invalid first item to double"
+        "文件损坏或文件格式不对！！"
     }
 
     fn cause(&self) -> Option<&error::Error> {
@@ -40,12 +40,65 @@ impl error::Error for WrongFileType {
     }
 }
 
+// 词语列表元素结构
 struct WordListItem {
     py_index_list: Vec<usize>,
     word: String,
     priority: usize,
 }
 
+// 文件内容结构体，方便判断文件格式
+struct InputFileBuff {
+    content: Vec<u8>,
+    pinyin_offset: usize,
+    words_offset: usize,
+}
+
+impl InputFileBuff {
+
+    fn new(content: Vec<u8>) -> Result <InputFileBuff, Box<dyn error::Error>> {
+        if content.len() < 0x2628 {
+            return Err(WrongFileType.into());
+        }
+
+        if &content[0..12] != b"\x40\x15\x00\x00\x44\x43\x53\x01\x01\x00\x00\x00"{
+            eprintln! ("确认你选择的是搜狗(.scel)词库?");
+            return Err(WrongFileType.into());
+        };
+
+        let buff = InputFileBuff {
+            content: content,
+            pinyin_offset: 0x1540,
+            words_offset: 0x2628,
+        };
+        Ok(buff)
+    }
+    // Rust 定义结构体时不能引用自己的成员，只能用函数的方式实现，比较蛋疼
+    fn get_name(&self) -> &[u8] {
+        &self.content[0x130..0x338]
+    }
+
+    fn get_type(&self) -> &[u8] {
+        &self.content[0x338..0x540]
+    }
+
+    fn get_info(&self) -> &[u8] {
+        &self.content[0x540..0xd40]
+    }
+    fn get_example(&self) -> &[u8] {
+        &self.content[0xd40..0x1540]
+    }
+
+    fn get_pinyin_range(&self) -> &[u8] {
+        &self.content[self.pinyin_offset..self.words_offset]
+    }
+    fn get_word_range(&self) -> &[u8] {
+        &self.content[self.words_offset..]
+    }
+
+}
+
+// 输入的参数选项结构
 pub struct Config {
     pub inputfile: String, 
     pub outputfile: String,
@@ -91,32 +144,42 @@ impl Config {
 
 pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
 
-    let pinyin_offset = 0x1540;
-    let words_offset = 0x2628;
+    // let pinyin_offset = 0x1540;
+    // let words_offset = 0x2628;
 
     let mut infileobj = File::open(&config.inputfile)?;
-    let mut outfileobj = File::create(&config.outputfile)?;
     
     let mut data: Vec<u8> = Vec::new();
     infileobj.read_to_end(&mut data)?;
 
-    let file_flag:Vec<u8> = b"\x40\x15\x00\x00\x44\x43\x53\x01\x01\x00\x00\x00".to_vec();
-    if file_flag != &data[0..12]{
-        eprintln! ("确认你选择的是搜狗(.scel)词库?");
-        return Err(WrongFileType.into());
-    };
+    // let file_flag:Vec<u8> = b"\x40\x15\x00\x00\x44\x43\x53\x01\x01\x00\x00\x00".to_vec();
+    // if file_flag != &data[0..12]{
+    //     eprintln! ("确认你选择的是搜狗(.scel)词库?");
+    //     return Err(WrongFileType.into());
+    // };
 
-    let pinyin_table = get_pinyin_table(&data[pinyin_offset..words_offset])?;
-    let wordlist = get_word_list(&data[words_offset..]);
+    // let pinyin_table = get_pinyin_table(&data[pinyin_offset..words_offset])?;
+    // let wordlist = get_word_list(&data[words_offset..]);
 
-    println!("词库名称：{}",UTF_16LE.decode(&data[0x130..0x338], DecoderTrap::Strict).unwrap());
-    println!("词库类型：{}",UTF_16LE.decode(&data[0x338..0x540], DecoderTrap::Strict).unwrap());
-    println!("词库信息：{}",UTF_16LE.decode(&data[0x540..0xd40], DecoderTrap::Strict).unwrap());
-    println!("词库示例：{}",UTF_16LE.decode(&data[0xd40..pinyin_offset], DecoderTrap::Strict).unwrap());
+    // println!("词库名称：{}",UTF_16LE.decode(&data[0x130..0x338], DecoderTrap::Strict).unwrap());
+    // println!("词库类型：{}",UTF_16LE.decode(&data[0x338..0x540], DecoderTrap::Strict).unwrap());
+    // println!("词库信息：{}",UTF_16LE.decode(&data[0x540..0xd40], DecoderTrap::Strict).unwrap());
+    // println!("词库示例：{}",UTF_16LE.decode(&data[0xd40..pinyin_offset], DecoderTrap::Strict).unwrap());
 
-    //let mut result:Vec<(String, String)> = Vec::new();
+    let inputbuff = InputFileBuff::new(data)?;
+
+    // 输出词库基本信息
+    println!("词库名称：{}",UTF_16LE.decode(inputbuff.get_name(), DecoderTrap::Strict).unwrap());
+    println!("词库类型：{}",UTF_16LE.decode(inputbuff.get_type(), DecoderTrap::Strict).unwrap());
+    println!("词库信息：{}",UTF_16LE.decode(inputbuff.get_info(), DecoderTrap::Strict).unwrap());
+    println!("词库示例：{}",UTF_16LE.decode(inputbuff.get_example(), DecoderTrap::Strict).unwrap());
+    
+    // 获取拼音表和词汇列表
+    let pinyin_table = get_pinyin_table(inputbuff.get_pinyin_range())?;
+    let wordlist = get_word_list(inputbuff.get_word_range());
 
     assert_eq!(String::from("zhuang"), pinyin_table[0x0191]);
+    let mut outfileobj = File::create(&config.outputfile)?;
 
     for s in &wordlist {
         let word = &s.word;
@@ -137,7 +200,7 @@ fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
 
     let mut py_table: Vec<String> = Vec::new();
     if &data[0..4] != b"\x9D\x01\x00\x00" {
-        panic!("No pinyin table found!! File maybe destroied.");
+        return Err(WrongFileType.into());
     }
 
     let mut csr = Cursor::new(&data[4..]);
@@ -154,7 +217,7 @@ fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
                 match e.kind() {
                     ErrorKind::UnexpectedEof => break,
                     _ => {
-                        panic!("Unknown issue occured!!");
+                        return Err(e.into());
                     }
                 }
             }
