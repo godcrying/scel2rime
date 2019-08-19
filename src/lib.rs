@@ -176,7 +176,7 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
     
     // 获取拼音表和词汇列表
     let pinyin_table = get_pinyin_table(inputbuff.get_pinyin_range())?;
-    let wordlist = get_word_list(inputbuff.get_word_range());
+    let wordlist = get_word_list(inputbuff.get_word_range())?;
 
     assert_eq!(String::from("zhuang"), pinyin_table[0x0191]);
     let mut outfileobj = File::create(&config.outputfile)?;
@@ -209,9 +209,9 @@ fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
             Ok(_) => {
                 let py_len = csr.read_u16::<LittleEndian>()? as usize;
                 let pinyinstart = csr.position() as usize;
-                let pinyin = UTF_16LE.decode(&csr.get_ref()[pinyinstart..pinyinstart+py_len], DecoderTrap::Strict).unwrap();
+                let pinyin = UTF_16LE.decode(&csr.get_ref()[pinyinstart..pinyinstart+py_len], DecoderTrap::Strict)?;
                 py_table.push(pinyin);
-                csr.seek(SeekFrom::Current(py_len as i64)).unwrap();
+                csr.seek(SeekFrom::Current(py_len as i64))?;
             },
             Err(e) => {
                 match e.kind() {
@@ -226,7 +226,7 @@ fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
     Ok(py_table)
 }
 
-fn get_word_list(data:&[u8]) -> Vec<WordListItem> {
+fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>> {
    
     let mut word_list = Vec::new();
 
@@ -235,23 +235,23 @@ fn get_word_list(data:&[u8]) -> Vec<WordListItem> {
         match csr.read_u16::<LittleEndian>() {
             Ok(mut same_num) => {
                 let mut pinyin: Vec<usize> = Vec::new();
-                let py_len = csr.read_u16::<LittleEndian>().unwrap() as usize;
+                let py_len = csr.read_u16::<LittleEndian>()? as usize;
                 let current_pos = csr.position() as usize;
                 while (csr.position() as usize) < current_pos +py_len {
-                    let py = csr.read_u16::<LittleEndian>().unwrap() as usize;
+                    let py = csr.read_u16::<LittleEndian>()? as usize;
                     pinyin.push(py);
                 }
 
                 assert_eq!(csr.position() as usize, current_pos + py_len);
 
                 while same_num > 0 {
-                    let word_len = csr.read_u16::<LittleEndian>().unwrap() as usize;
+                    let word_len = csr.read_u16::<LittleEndian>()? as usize;
                     let wordstartpos = csr.position() as usize;
                     let word = UTF_16LE.decode(&csr.get_ref()[wordstartpos..wordstartpos+word_len], DecoderTrap::Strict).unwrap();
-                    csr.seek(SeekFrom::Current(word_len as i64)).unwrap();
-                    let ext_len = csr.read_u16::<LittleEndian>().unwrap() as usize;
-                    let priority = csr.read_u16::<LittleEndian>().unwrap() as usize;
-                    csr.seek(SeekFrom::Current((ext_len-2) as i64)).unwrap();
+                    csr.seek(SeekFrom::Current(word_len as i64))?;
+                    let ext_len = csr.read_u16::<LittleEndian>()? as usize;
+                    let priority = csr.read_u16::<LittleEndian>()? as usize;
+                    csr.seek(SeekFrom::Current((ext_len-2) as i64))?;
                     word_list.push(WordListItem{py_index_list: pinyin.clone(), word: word, priority: priority});
                     same_num -=1;
                 }
@@ -260,13 +260,13 @@ fn get_word_list(data:&[u8]) -> Vec<WordListItem> {
                 match e.kind() {
                     ErrorKind::UnexpectedEof => break,
                     _ => {
-                        panic!("Unknown issue occured!!");
+                        return Err(e.into());
                     }
                 }
             }
         }
     }
-    word_list
+    Ok(word_list)
 }
 
 
