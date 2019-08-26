@@ -304,9 +304,10 @@ fn get_word_list(data: &[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::ffi::OsString;
 
     #[test]
-    fn testPath() {
+    fn test_path() {
         let path = Path::new("/home/zhenyu/touhou.scel");
         assert_eq!(path.file_stem().unwrap(), &OsString::from("touhou"));
     }
