@@ -1,23 +1,21 @@
+extern crate byteorder;
 extern crate clap;
 extern crate encoding;
-extern crate byteorder;
 
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Cursor;
-use std::io::SeekFrom;
 use std::io::ErrorKind;
+use std::io::SeekFrom;
 
-use std::path::Path;
-use std::ffi::OsString;
 use std::error;
 use std::fmt;
+use std::path::Path;
 
+use byteorder::{LittleEndian, ReadBytesExt};
 use clap::{App, Arg};
-use encoding::all::{UTF_16LE,UTF_8};
-use encoding::{Encoding,EncoderTrap,DecoderTrap};
-use byteorder::{ByteOrder,LittleEndian,ReadBytesExt};
-
+use encoding::all::{UTF_16LE, UTF_8};
+use encoding::{DecoderTrap, EncoderTrap, Encoding};
 
 // 自定义错误类型
 #[derive(Debug, Clone)]
@@ -34,13 +32,14 @@ impl error::Error for WrongFileType {
         "文件损坏或文件格式不对！！"
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         // Generic error, underlying cause isn't tracked.
         None
     }
 }
 
 // 词语列表元素结构
+#[allow(dead_code)]
 struct WordListItem {
     py_index_list: Vec<usize>,
     word: String,
@@ -55,19 +54,18 @@ struct InputFileBuff {
 }
 
 impl InputFileBuff {
-
-    fn new(content: Vec<u8>) -> Result <InputFileBuff, Box<dyn error::Error>> {
+    fn new(content: Vec<u8>) -> Result<InputFileBuff, Box<dyn error::Error>> {
         if content.len() < 0x2628 {
             return Err(WrongFileType.into());
         }
 
-        if &content[0..12] != b"\x40\x15\x00\x00\x44\x43\x53\x01\x01\x00\x00\x00"{
-            eprintln! ("确认你选择的是搜狗(.scel)词库?");
+        if &content[0..12] != b"\x40\x15\x00\x00\x44\x43\x53\x01\x01\x00\x00\x00" {
+            eprintln!("确认你选择的是搜狗(.scel)词库?");
             return Err(WrongFileType.into());
         };
 
         let buff = InputFileBuff {
-            content: content,
+            content,
             pinyin_offset: 0x1540,
             words_offset: 0x2628,
         };
@@ -95,32 +93,35 @@ impl InputFileBuff {
     fn get_word_range(&self) -> &[u8] {
         &self.content[self.words_offset..]
     }
-
 }
 
 // 输入的参数选项结构
 pub struct Config {
-    pub inputfile: String, 
+    pub inputfile: String,
     pub outputfile: String,
 }
 
 impl Config {
     pub fn new() -> Result<Config, &'static str> {
         let matches = App::new("scel2rime")
-                    .version("0.1.0")
-                    .author("godcrying")
-                    .about("Convert sogou scel file to rime dict file.")
-                    .arg(Arg::with_name("input")
-                        .short("i")
-                        .long("input")
-                        .takes_value(true)
-                        .help("A sogou scel filename."))
-                    .arg(Arg::with_name("output")
-                        .short("o")
-                        .long("output")
-                        .takes_value(true)
-                        .help("An output filename."))
-                    .get_matches();
+            .version("0.1.0")
+            .author("godcrying")
+            .about("Convert sogou scel file to rime dict file.")
+            .arg(
+                Arg::with_name("input")
+                    .short("i")
+                    .long("input")
+                    .takes_value(true)
+                    .help("A sogou scel filename."),
+            )
+            .arg(
+                Arg::with_name("output")
+                    .short("o")
+                    .long("output")
+                    .takes_value(true)
+                    .help("An output filename."),
+            )
+            .get_matches();
 
         let input_file = match matches.value_of("input") {
             Some(s) => s.to_string(),
@@ -134,21 +135,23 @@ impl Config {
             None => {
                 let input_path = Path::new(&input_file);
                 let filename = input_path.file_stem().unwrap();
-                format!("{}{}",filename.to_str().unwrap(), ".txt")
+                format!("{}{}", filename.to_str().unwrap(), ".txt")
             }
         };
 
-        Ok(Config{ inputfile: input_file, outputfile: output_file})
+        Ok(Config {
+            inputfile: input_file,
+            outputfile: output_file,
+        })
     }
 }
 
-pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
-
+pub fn run(config: Config) -> Result<(), Box<dyn error::Error>> {
     // let pinyin_offset = 0x1540;
     // let words_offset = 0x2628;
 
     let mut infileobj = File::open(&config.inputfile)?;
-    
+
     let mut data: Vec<u8> = Vec::new();
     infileobj.read_to_end(&mut data)?;
 
@@ -169,11 +172,31 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
     let inputbuff = InputFileBuff::new(data)?;
 
     // 输出词库基本信息
-    println!("词库名称：{}",UTF_16LE.decode(inputbuff.get_name(), DecoderTrap::Strict).unwrap());
-    println!("词库类型：{}",UTF_16LE.decode(inputbuff.get_type(), DecoderTrap::Strict).unwrap());
-    println!("词库信息：{}",UTF_16LE.decode(inputbuff.get_info(), DecoderTrap::Strict).unwrap());
-    println!("词库示例：{}",UTF_16LE.decode(inputbuff.get_example(), DecoderTrap::Strict).unwrap());
-    
+    println!(
+        "词库名称：{}",
+        UTF_16LE
+            .decode(inputbuff.get_name(), DecoderTrap::Strict)
+            .unwrap()
+    );
+    println!(
+        "词库类型：{}",
+        UTF_16LE
+            .decode(inputbuff.get_type(), DecoderTrap::Strict)
+            .unwrap()
+    );
+    println!(
+        "词库信息：{}",
+        UTF_16LE
+            .decode(inputbuff.get_info(), DecoderTrap::Strict)
+            .unwrap()
+    );
+    println!(
+        "词库示例：{}",
+        UTF_16LE
+            .decode(inputbuff.get_example(), DecoderTrap::Strict)
+            .unwrap()
+    );
+
     // 获取拼音表和词汇列表
     let pinyin_table = get_pinyin_table(inputbuff.get_pinyin_range())?;
     let wordlist = get_word_list(inputbuff.get_word_range())?;
@@ -184,20 +207,22 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
     for s in &wordlist {
         let word = &s.word;
         let pinyin_index = &s.py_index_list;
-        let mut pinyin = format!("");
-        
+        let mut pinyin = String::new();
+
         for index in pinyin_index {
-            pinyin = format!("{} {}",pinyin,pinyin_table[*index]);
+            pinyin.push(' ');
+            pinyin.push_str(&pinyin_table[*index]);
         }
-        let item = format!("{}\t{}\n",word,pinyin).to_string();
-        outfileobj.write(&UTF_8.encode(&item,EncoderTrap::Strict).unwrap()).unwrap();
+        let item = format!("{}\t{}\n", word, pinyin).to_string();
+        outfileobj
+            .write_all(&UTF_8.encode(&item, EncoderTrap::Strict).unwrap())
+            .unwrap();
     }
 
     Ok(())
 }
 
 fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
-
     let mut py_table: Vec<String> = Vec::new();
     if &data[0..4] != b"\x9D\x01\x00\x00" {
         return Err(WrongFileType.into());
@@ -209,25 +234,25 @@ fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
             Ok(_) => {
                 let py_len = csr.read_u16::<LittleEndian>()? as usize;
                 let pinyinstart = csr.position() as usize;
-                let pinyin = UTF_16LE.decode(&csr.get_ref()[pinyinstart..pinyinstart+py_len], DecoderTrap::Strict)?;
+                let pinyin = UTF_16LE.decode(
+                    &csr.get_ref()[pinyinstart..pinyinstart + py_len],
+                    DecoderTrap::Strict,
+                )?;
                 py_table.push(pinyin);
                 csr.seek(SeekFrom::Current(py_len as i64))?;
-            },
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::UnexpectedEof => break,
-                    _ => {
-                        return Err(e.into());
-                    }
-                }
             }
+            Err(e) => match e.kind() {
+                ErrorKind::UnexpectedEof => break,
+                _ => {
+                    return Err(e.into());
+                }
+            },
         }
     }
     Ok(py_table)
 }
 
-fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>> {
-   
+fn get_word_list(data: &[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>> {
     let mut word_list = Vec::new();
 
     let mut csr = Cursor::new(&data);
@@ -237,7 +262,7 @@ fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>>
                 let mut pinyin: Vec<usize> = Vec::new();
                 let py_len = csr.read_u16::<LittleEndian>()? as usize;
                 let current_pos = csr.position() as usize;
-                while (csr.position() as usize) < current_pos +py_len {
+                while (csr.position() as usize) < current_pos + py_len {
                     let py = csr.read_u16::<LittleEndian>()? as usize;
                     pinyin.push(py);
                 }
@@ -247,28 +272,34 @@ fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>>
                 while same_num > 0 {
                     let word_len = csr.read_u16::<LittleEndian>()? as usize;
                     let wordstartpos = csr.position() as usize;
-                    let word = UTF_16LE.decode(&csr.get_ref()[wordstartpos..wordstartpos+word_len], DecoderTrap::Strict).unwrap();
+                    let word = UTF_16LE
+                        .decode(
+                            &csr.get_ref()[wordstartpos..wordstartpos + word_len],
+                            DecoderTrap::Strict,
+                        )
+                        .unwrap();
                     csr.seek(SeekFrom::Current(word_len as i64))?;
                     let ext_len = csr.read_u16::<LittleEndian>()? as usize;
                     let priority = csr.read_u16::<LittleEndian>()? as usize;
-                    csr.seek(SeekFrom::Current((ext_len-2) as i64))?;
-                    word_list.push(WordListItem{py_index_list: pinyin.clone(), word: word, priority: priority});
-                    same_num -=1;
-                }
-            },
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::UnexpectedEof => break,
-                    _ => {
-                        return Err(e.into());
-                    }
+                    csr.seek(SeekFrom::Current((ext_len - 2) as i64))?;
+                    word_list.push(WordListItem {
+                        py_index_list: pinyin.clone(),
+                        word,
+                        priority,
+                    });
+                    same_num -= 1;
                 }
             }
+            Err(e) => match e.kind() {
+                ErrorKind::UnexpectedEof => break,
+                _ => {
+                    return Err(e.into());
+                }
+            },
         }
     }
     Ok(word_list)
 }
-
 
 #[cfg(test)]
 mod test {
@@ -277,7 +308,7 @@ mod test {
     #[test]
     fn testPath() {
         let path = Path::new("/home/zhenyu/touhou.scel");
-        assert_eq!(path.file_stem().unwrap() , &OsString::from("touhou"));
+        assert_eq!(path.file_stem().unwrap(), &OsString::from("touhou"));
     }
 
 }
