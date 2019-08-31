@@ -189,8 +189,8 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
         for index in pinyin_index {
             pinyin = format!("{} {}",pinyin,pinyin_table[*index]);
         }
-        let item = format!("{}\t{}\n",word,pinyin).to_string();
-        outfileobj.write(&UTF_8.encode(&item,EncoderTrap::Strict).unwrap()).unwrap();
+        let item = format!("{}\t{}\n",word,pinyin.trim()).to_string();
+        outfileobj.write_all(&UTF_8.encode(&item,EncoderTrap::Strict).unwrap()).unwrap();
     }
 
     Ok(())
