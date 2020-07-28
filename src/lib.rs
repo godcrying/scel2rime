@@ -9,14 +9,13 @@ use std::io::SeekFrom;
 use std::io::ErrorKind;
 
 use std::path::Path;
-use std::ffi::OsString;
 use std::error;
 use std::fmt;
 
 use clap::{App, Arg};
 use encoding::all::{UTF_16LE,UTF_8};
 use encoding::{Encoding,EncoderTrap,DecoderTrap};
-use byteorder::{ByteOrder,LittleEndian,ReadBytesExt};
+use byteorder::{LittleEndian,ReadBytesExt};
 
 
 // 自定义错误类型
@@ -34,7 +33,7 @@ impl error::Error for WrongFileType {
         "文件损坏或文件格式不对！！"
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         // Generic error, underlying cause isn't tracked.
         None
     }
@@ -133,8 +132,17 @@ impl Config {
             Some(s) => s.to_string(),
             None => {
                 let input_path = Path::new(&input_file);
-                let filename = input_path.file_stem().unwrap();
-                format!("{}{}",filename.to_str().unwrap(), ".txt")
+
+                if let Some(filename) = input_path.file_stem() {
+                    match filename.to_str() {
+                        Some(tmp_str) => format!("{}{}",tmp_str, ".txt"),
+                        None=> {
+                            return Err("Something wrong when due with output file!!");
+                        }
+                    }
+                }else{
+                    return Err("Something wrong when due with output file!!");
+                }
             }
         };
 
@@ -152,27 +160,13 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
     let mut data: Vec<u8> = Vec::new();
     infileobj.read_to_end(&mut data)?;
 
-    // let file_flag:Vec<u8> = b"\x40\x15\x00\x00\x44\x43\x53\x01\x01\x00\x00\x00".to_vec();
-    // if file_flag != &data[0..12]{
-    //     eprintln! ("确认你选择的是搜狗(.scel)词库?");
-    //     return Err(WrongFileType.into());
-    // };
-
-    // let pinyin_table = get_pinyin_table(&data[pinyin_offset..words_offset])?;
-    // let wordlist = get_word_list(&data[words_offset..]);
-
-    // println!("词库名称：{}",UTF_16LE.decode(&data[0x130..0x338], DecoderTrap::Strict).unwrap());
-    // println!("词库类型：{}",UTF_16LE.decode(&data[0x338..0x540], DecoderTrap::Strict).unwrap());
-    // println!("词库信息：{}",UTF_16LE.decode(&data[0x540..0xd40], DecoderTrap::Strict).unwrap());
-    // println!("词库示例：{}",UTF_16LE.decode(&data[0xd40..pinyin_offset], DecoderTrap::Strict).unwrap());
-
     let inputbuff = InputFileBuff::new(data)?;
 
     // 输出词库基本信息
-    println!("词库名称：{}",UTF_16LE.decode(inputbuff.get_name(), DecoderTrap::Strict).unwrap());
-    println!("词库类型：{}",UTF_16LE.decode(inputbuff.get_type(), DecoderTrap::Strict).unwrap());
-    println!("词库信息：{}",UTF_16LE.decode(inputbuff.get_info(), DecoderTrap::Strict).unwrap());
-    println!("词库示例：{}",UTF_16LE.decode(inputbuff.get_example(), DecoderTrap::Strict).unwrap());
+    println!("词库名称：{}",UTF_16LE.decode(inputbuff.get_name(), DecoderTrap::Strict)?);
+    println!("词库类型：{}",UTF_16LE.decode(inputbuff.get_type(), DecoderTrap::Strict)?);
+    println!("词库信息：{}",UTF_16LE.decode(inputbuff.get_info(), DecoderTrap::Strict)?);
+    println!("词库示例：{}",UTF_16LE.decode(inputbuff.get_example(), DecoderTrap::Strict)?);
     
     // 获取拼音表和词汇列表
     let pinyin_table = get_pinyin_table(inputbuff.get_pinyin_range())?;
@@ -190,7 +184,7 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
             pinyin = format!("{} {}",pinyin,pinyin_table[*index]);
         }
         let item = format!("{}\t{}\n",word,pinyin.trim()).to_string();
-        outfileobj.write_all(&UTF_8.encode(&item,EncoderTrap::Strict).unwrap()).unwrap();
+        outfileobj.write_all(&UTF_8.encode(&item,EncoderTrap::Strict)?)?;
     }
 
     Ok(())
@@ -247,7 +241,7 @@ fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>>
                 while same_num > 0 {
                     let word_len = csr.read_u16::<LittleEndian>()? as usize;
                     let wordstartpos = csr.position() as usize;
-                    let word = UTF_16LE.decode(&csr.get_ref()[wordstartpos..wordstartpos+word_len], DecoderTrap::Strict).unwrap();
+                    let word = UTF_16LE.decode(&csr.get_ref()[wordstartpos..wordstartpos+word_len], DecoderTrap::Strict)?;
                     csr.seek(SeekFrom::Current(word_len as i64))?;
                     let ext_len = csr.read_u16::<LittleEndian>()? as usize;
                     let priority = csr.read_u16::<LittleEndian>()? as usize;
@@ -271,13 +265,17 @@ fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>>
 
 
 #[cfg(test)]
+use std::ffi::OsString;
+
 mod test {
     use super::*;
 
     #[test]
     fn testPath() {
         let path = Path::new("/home/zhenyu/touhou.scel");
-        assert_eq!(path.file_stem().unwrap() , &OsString::from("touhou"));
+        if let Some(filepath) = path.file_stem() {
+            assert_eq!(filepath , &OsString::from("touhou"));
+        };
     }
 
 }
