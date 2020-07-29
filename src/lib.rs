@@ -15,7 +15,7 @@ use std::fmt;
 use clap::{App, Arg};
 use encoding::all::{UTF_16LE,UTF_8};
 use encoding::{Encoding,EncoderTrap,DecoderTrap};
-use byteorder::{LittleEndian,ReadBytesExt};
+use byteorder::{ByteOrder,LittleEndian,ReadBytesExt};
 
 
 // 自定义错误类型
@@ -175,15 +175,16 @@ pub fn run(config:Config) -> Result<(), Box<dyn error::Error>> {
     assert_eq!(String::from("zhuang"), pinyin_table[0x0191]);
     let mut outfileobj = File::create(&config.outputfile)?;
 
-    for s in &wordlist {
-        let word = &s.word;
-        let pinyin_index = &s.py_index_list;
-        let mut pinyin = format!("");
-        
-        for index in pinyin_index {
-            pinyin = format!("{} {}",pinyin,pinyin_table[*index]);
-        }
-        let item = format!("{}\t{}\n",word,pinyin.trim()).to_string();
+    while let Some(worditem) = wordlist.iter().next() {
+        let word = &worditem.word;
+        let pinyin_index = &worditem.py_index_list;
+
+        let pinyin_vec: Vec<String> = pinyin_index
+                                    .iter().map(|&x| pinyin_table[x].clone())
+                                    .collect();
+
+        let pinyin_str = pinyin_vec.join(" ");
+        let item = format!("{}\t{}\n",word,pinyin_str.trim());
         outfileobj.write_all(&UTF_8.encode(&item,EncoderTrap::Strict)?)?;
     }
 
@@ -202,8 +203,9 @@ fn get_pinyin_table(data: &[u8]) -> Result<Vec<String>, Box<dyn error::Error>> {
         match csr.read_u16::<LittleEndian>() {
             Ok(_) => {
                 let py_len = csr.read_u16::<LittleEndian>()? as usize;
-                let pinyinstart = csr.position() as usize;
-                let pinyin = UTF_16LE.decode(&csr.get_ref()[pinyinstart..pinyinstart+py_len], DecoderTrap::Strict)?;
+                let mut pinyin_buff: Vec::<u8> = Vec::new();
+                csr.get_ref().take(py_len as u64).read_to_end(&mut pinyin_buff)?;
+                let pinyin = UTF_16LE.decode(&pinyin_buff, DecoderTrap::Strict)?;
                 py_table.push(pinyin);
                 csr.seek(SeekFrom::Current(py_len as i64))?;
             },
@@ -228,24 +230,26 @@ fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>>
     loop {
         match csr.read_u16::<LittleEndian>() {
             Ok(mut same_num) => {
-                let mut pinyin: Vec<usize> = Vec::new();
+                let mut pinyin_index_buff: Vec<u16> = Vec::new();
+                let mut pinyin_bits_buff: Vec<u8> = Vec::new();
                 let py_len = csr.read_u16::<LittleEndian>()? as usize;
-                let current_pos = csr.position() as usize;
-                while (csr.position() as usize) < current_pos +py_len {
-                    let py = csr.read_u16::<LittleEndian>()? as usize;
-                    pinyin.push(py);
-                }
 
-                assert_eq!(csr.position() as usize, current_pos + py_len);
+                csr.get_ref().take(py_len as u64).read_to_end(&mut pinyin_bits_buff)?;
+                LittleEndian::read_u16_into(&pinyin_bits_buff ,&mut pinyin_index_buff);
+                let pinyin: Vec<usize> = pinyin_index_buff.iter().map(|&x| x as usize).collect();
+                csr.seek(SeekFrom::Current(py_len as i64))?;
 
                 while same_num > 0 {
                     let word_len = csr.read_u16::<LittleEndian>()? as usize;
-                    let wordstartpos = csr.position() as usize;
-                    let word = UTF_16LE.decode(&csr.get_ref()[wordstartpos..wordstartpos+word_len], DecoderTrap::Strict)?;
+                    let mut word_buff: Vec<u8> = Vec::new();
+                    csr.get_ref().take(word_len as u64).read_to_end(&mut word_buff)?;
+                    let word = UTF_16LE.decode(&word_buff, DecoderTrap::Strict)?;
                     csr.seek(SeekFrom::Current(word_len as i64))?;
+
                     let ext_len = csr.read_u16::<LittleEndian>()? as usize;
                     let priority = csr.read_u16::<LittleEndian>()? as usize;
                     csr.seek(SeekFrom::Current((ext_len-2) as i64))?;
+
                     word_list.push(WordListItem{py_index_list: pinyin.clone(), word: word, priority: priority});
                     same_num -=1;
                 }
@@ -265,10 +269,10 @@ fn get_word_list(data:&[u8]) -> Result<Vec<WordListItem>, Box<dyn error::Error>>
 
 
 #[cfg(test)]
-use std::ffi::OsString;
 
 mod test {
-    use super::*;
+    use super::Path;
+    use std::ffi::OsString;
 
     #[test]
     fn testPath() {
